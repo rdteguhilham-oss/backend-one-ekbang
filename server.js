@@ -378,7 +378,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({ status: 'error', pesan: 'Kesalahan sistem saat memproses.' });
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`Server digembok dan berjalan aman di http://localhost:${PORT}`);
+    console.log(`Server digembok dan berjalan aman di port ${PORT}`);
 });
