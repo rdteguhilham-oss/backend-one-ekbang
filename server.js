@@ -33,10 +33,16 @@ const upload = multer({
 
 const app = express();
 
-app.use(cors({
-    origin: true,
-    credentials: true
-}));
+const corsOptions = {
+    origin: ['https://frontend-one-ekbang.vercel.app', 'http://localhost:5173'],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS', // Mengizinkan semua metode termasuk OPTIONS (Preflight)
+    allowedHeaders: ['Content-Type', 'Authorization'], // Mengizinkan header yang kita pakai
+    credentials: true,
+    optionsSuccessStatus: 200 // Mengakali browser yang sangat ketat
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json()); 
 
