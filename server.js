@@ -1,5 +1,4 @@
 const express = require('express');
-const cors = require('cors');
 const mysql = require('mysql2'); 
 const fs = require('fs');
 const path = require('path'); 
@@ -46,8 +45,6 @@ app.use((req, res, next) => {
     }
     next();
 });
-
-app.use(express.json());
 
 app.use(express.json()); 
 
@@ -395,6 +392,6 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server digembok dan berjalan aman di port ${PORT}`);
 });
