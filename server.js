@@ -50,22 +50,29 @@ app.use(express.json());
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-const db = mysql.createConnection({
+// === MENGGUNAKAN POOL AGAR SERVER TIDAK MATI SAAT MYSQL TERPUTUS ===
+const db = mysql.createPool({
     host: 'mysql-379152c5-one-ekbang.d.aivencloud.com',
     port: 27863,
     user: 'avnadmin',
     password: process.env.DB_PASSWORD, 
     database: 'defaultdb',
     ssl: {
-        rejectUnauthorized: false // Memaksa Node.js menggunakan SSL agar diterima Aiven
-    }
+        rejectUnauthorized: false 
+    },
+    // Pengaturan kebal peluru:
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 });
 
-db.connect((error) => {
-    if (error) {
-        console.log('Waduh, gagal masuk gudang:', error);
+// Tes apakah kolam koneksinya berhasil memancing data
+db.getConnection((err, conn) => {
+    if (err) {
+        console.log('Waduh, gagal masuk gudang:', err.message);
     } else {
-        console.log('Gudang MySQL Berhasil Tersambung! 🚀');
+        console.log('Gudang MySQL Berhasil Tersambung via Pool! 🚀');
+        conn.release(); // Lepaskan kembali koneksi ke kolam
     }
 });
 
