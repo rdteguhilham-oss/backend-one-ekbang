@@ -33,12 +33,21 @@ const upload = multer({
 
 const app = express();
 
-const corsOptions = {
-    origin: ['https://frontend-one-ekbang.vercel.app', 'http://localhost:5173'],
-    credentials: true
-};
+app.use((req, res, next) => {
+    const allowedOrigin = req.headers.origin || "*";
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-app.use(cors(corsOptions));
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+});
+
+app.use(express.json());
 
 app.use(express.json()); 
 
