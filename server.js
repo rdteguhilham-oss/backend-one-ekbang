@@ -35,14 +35,10 @@ const app = express();
 
 const corsOptions = {
     origin: ['https://frontend-one-ekbang.vercel.app', 'http://localhost:5173'],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS', // Mengizinkan semua metode termasuk OPTIONS (Preflight)
-    allowedHeaders: ['Content-Type', 'Authorization'], // Mengizinkan header yang kita pakai
-    credentials: true,
-    optionsSuccessStatus: 200 // Mengakali browser yang sangat ketat
+    credentials: true
 };
 
 app.use(cors(corsOptions));
-app.options('/(.*)', cors(corsOptions));
 
 app.use(express.json()); 
 
