@@ -105,7 +105,9 @@ const cekValidasi = (req, res, next) => {
 
 
 // KUMPULAN RUTE API SERVER
-
+app.get('/', (req, res) => {
+    res.send('API Backend Ekbang Berjalan Normal! 🚀');
+});
 // Rute GET Admin (DIGEMBOK)
 app.get('/admin', cekToken, (req,res) => {
     const usersSQL = 'SELECT * FROM admin';
