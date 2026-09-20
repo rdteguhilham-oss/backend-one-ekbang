@@ -10,19 +10,23 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator'); 
 const KEY_NODEJS = "dataekbang2026"; 
 
-const uploadDir = path.join(__dirname, 'uploads');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Menghubungkan ke brankas Cloudinary menggunakan kunci di .env
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadDir); 
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
+// Instruksi baru untuk Multer (Satpam) agar menitipkan ke Kurir
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'one_ekbang', // Ini akan otomatis bikin folder 'one_ekbang' di Cloudinary-mu
+    allowed_formats: ['jpg', 'png', 'jpeg', 'pdf', 'webp']
+  },
 });
 
 const upload = multer({ 
@@ -155,7 +159,7 @@ app.post('/layanan', upload.fields([
     body('nama').trim().escape()
 ], cekValidasi, (req, res) => {
     const { nik, nama, no_telepon, jenisLayanan } = req.body;
-    const getNamaFile = (namaField) => req.files && req.files[namaField] ? req.files[namaField][0].filename : null;
+    const getNamaFile = (namaField) => req.files && req.files[namaField] ? req.files[namaField][0].path : null;
 
     const dataKirim = [
         nik, nama, no_telepon, jenisLayanan, getNamaFile('foto_ktp'), getNamaFile('foto_kk'), getNamaFile('surat_pengantar'), 
@@ -225,7 +229,7 @@ app.post('/petugas', cekToken, upload.single('file_sk'), [
     body('nama_petugas').trim().escape()
 ], cekValidasi, (req, res) => {
     const { nama_petugas, kategori_petugas, wilayah, no_sk } = req.body;
-    const file_sk = req.file ? req.file.filename : null;
+    const file_sk = req.file ? req.file.path : null;
     if (!file_sk) return res.status(400).json({ status: "gagal", pesan: "File SK wajib diunggah!" });
 
     const sql = "INSERT INTO data_petugas (nama_petugas, kategori_petugas, wilayah, no_sk, file_sk) VALUES (?, ?, ?, ?, ?)";
@@ -237,7 +241,7 @@ app.post('/petugas', cekToken, upload.single('file_sk'), [
 
 app.post('/kegiatan-gober', cekToken, upload.single('foto'), (req, res) => {
     const { petugas_id, nama_petugas, lokasi, panjang_meter } = req.body;
-    const foto = req.file ? req.file.filename : null;
+    const foto = req.file ? req.file.path : null;
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto!" });
 
     const sql = "INSERT INTO kegiatan_gober (petugas_id, nama_petugas, lokasi, panjang_meter, foto) VALUES (?, ?, ?, ?, ?)";
@@ -259,7 +263,7 @@ app.post('/kegiatan-sampah', cekToken, upload.single('foto'), (req, res) => {
     const { petugas_id, nama_petugas, kategori_tugas, data_rw, berat_kiloan } = req.body;
     
     // Mesin X-Ray menangkap file foto
-    const foto = req.file ? req.file.filename : null;
+    const foto = req.file ? req.file.path : null;
     
     // Validasi pencegah kecurangan: Kalau tidak kirim foto, tolak laporannya!
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto timbangan!" });
@@ -280,7 +284,7 @@ app.get('/kegiatan-sampah', cekToken, (req, res) => {
 
 app.post('/kegiatan-agenda', cekToken, upload.single('foto_dokumentasi'), (req, res) => {
     const { judul_agenda, kategori_agenda, tanggal_waktu, lokasi, catatan_reminder } = req.body;
-    const foto_dokumentasi = req.file ? req.file.filename : null;
+    const foto_dokumentasi = req.file ? req.file.path : null;
 
     const sql = `INSERT INTO kegiatan_agenda (judul_agenda, kategori_agenda, tanggal_waktu, lokasi, catatan_reminder, foto_dokumentasi) VALUES (?, ?, ?, ?, ?, ?)`;
     db.query(sql, [judul_agenda, kategori_agenda, tanggal_waktu, lokasi, catatan_reminder, foto_dokumentasi], (err, result) => {
@@ -307,7 +311,7 @@ app.delete('/kegiatan-agenda/:id', cekToken, (req, res) => {
 });
 
 app.put('/kegiatan-agenda/:id/foto', cekToken, upload.single('foto_dokumentasi'), (req, res) => {
-    const foto = req.file ? req.file.filename : null;
+    const foto = req.file ? req.file.path : null;
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "File foto tidak ditemukan!" });
 
     const sql = "UPDATE kegiatan_agenda SET foto_dokumentasi = ? WHERE id = ?";
@@ -329,7 +333,7 @@ app.post('/peta-gis', cekToken, upload.single('foto_url'), [
     body('alamat').trim()
 ], cekValidasi, (req, res) => {
     const { kategori_lokasi, nama_lokasi, alamat, latitude, longitude, status, ketua, luas_lahan, data_rw } = req.body;
-    const foto = req.file ? req.file.filename : null;
+    const foto = req.file ? req.file.path : null;
 
     const sql = `INSERT INTO titik_peta_gis (kategori_lokasi, nama_lokasi, alamat, latitude, longitude, foto_url, status, ketua, luas_lahan, data_rw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     const values = [kategori_lokasi, nama_lokasi, alamat, latitude, longitude, foto, status || null, ketua || null, luas_lahan || null, data_rw || null];
