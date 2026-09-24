@@ -152,8 +152,9 @@ app.post('/layanan', upload.fields([
     { name: 'sertifikat_tanah', maxCount: 1 }, { name: 'foto_kondisi_rumah', maxCount: 1 }, { name: 'foto_lokasi', maxCount: 1 },
     { name: 'sk_buruan_sae', maxCount: 1 }, { name: 'kebutuhan_tanaman', maxCount: 1 }, { name: 'dokumen_a1', maxCount: 1 },
     { name: 'dokumen_a2', maxCount: 1 }, { name: 'foto_rembuk', maxCount: 1 }, { name: 'daftar_hadir', maxCount: 1 },
-    { name: 'ba_muskel', maxCount: 1 }, { name: 'foto_muskel', maxCount: 1 },
-    { name: 'foto_halaman', maxCount: 1 } // <--- ALAT PENERIMA FOTO HALAMAN BARU
+    { name: 'ba_muskel', maxCount: 1 }, { name: 'foto_muskel', maxCount: 1 }, { name: 'foto_halaman', maxCount: 1 },
+    // TAMBAHAN 2 ALAT PENERIMA UNTUK SARPRAS DLH
+    { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 }
 ]), [
     body('nik').isNumeric().withMessage('NIK wajib berupa angka!'),
     body('nama').trim().escape()
@@ -165,12 +166,15 @@ app.post('/layanan', upload.fields([
         nik, nama, no_telepon, jenisLayanan, getNamaFile('foto_ktp'), getNamaFile('foto_kk'), getNamaFile('surat_pengantar'), 
         getNamaFile('sertifikat_tanah'), getNamaFile('foto_kondisi_rumah'), getNamaFile('foto_lokasi'), getNamaFile('sk_buruan_sae'), getNamaFile('kebutuhan_tanaman'), 
         getNamaFile('dokumen_a1'), getNamaFile('dokumen_a2'), getNamaFile('foto_rembuk'), getNamaFile('daftar_hadir'), getNamaFile('ba_muskel'), getNamaFile('foto_muskel'),
-        getNamaFile('foto_halaman') // <--- DATA DIMASUKKAN KE ARRAY
+        getNamaFile('foto_halaman'), 
+        // TAMBAHAN DATA UNTUK DIKIRIM KE DATABASE
+        getNamaFile('proposal_sarpras'), getNamaFile('foto_sarpras')
     ];
 
+    // UPDATE STRING SQL AGAR MENAMPUNG 2 KOLOM BARU & 2 TANDA TANYA (?) BARU
     const tambahLayananSQL = `INSERT INTO pengajuan_layanan 
-        (nik_pemohon, nama_pemohon, no_telepon, jenis_layanan, foto_ktp, foto_kk, surat_pengantar, sertifikat_tanah, foto_kondisi_rumah, foto_lokasi, sk_buruan_sae, kebutuhan_tanaman, dokumen_a1, dokumen_a2, foto_rembuk, daftar_hadir, ba_muskel, foto_muskel, foto_halaman) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; 
+        (nik_pemohon, nama_pemohon, no_telepon, jenis_layanan, foto_ktp, foto_kk, surat_pengantar, sertifikat_tanah, foto_kondisi_rumah, foto_lokasi, sk_buruan_sae, kebutuhan_tanaman, dokumen_a1, dokumen_a2, foto_rembuk, daftar_hadir, ba_muskel, foto_muskel, foto_halaman, proposal_sarpras, foto_sarpras) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; 
     
     db.query(tambahLayananSQL, dataKirim, (err, hasil) => {
         if(err) return res.status(500).send('Gagal menyimpan data baru ke database!');
