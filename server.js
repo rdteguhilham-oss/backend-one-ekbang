@@ -8,7 +8,7 @@ require('dotenv').config();
 // --- ALAT KEAMANAN BARU ---
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator'); 
-const KEY_NODEJS = "dataekbang2026"; 
+const KEY_NODEJS = process.env.KEY_NODE_JS;
 
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
