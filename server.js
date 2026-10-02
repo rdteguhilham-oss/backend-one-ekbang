@@ -243,44 +243,56 @@ app.post('/petugas', cekToken, upload.single('file_sk'), [
     });
 });
 
+// === PERUBAHAN BARU: RUTE POST GOBER ===
 app.post('/kegiatan-gober', cekToken, upload.single('foto'), (req, res) => {
-    const { petugas_id, nama_petugas, lokasi, panjang_meter } = req.body;
+    const { petugas_id, lokasi, panjang_meter } = req.body;
     const foto = req.file ? req.file.path : null;
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto!" });
 
-    const sql = "INSERT INTO kegiatan_gober (petugas_id, nama_petugas, lokasi, panjang_meter, foto) VALUES (?, ?, ?, ?, ?)";
-    db.query(sql, [petugas_id, nama_petugas, lokasi, panjang_meter, foto], (err, result) => {
+    const sql = "INSERT INTO kegiatan_gober (petugas_id, lokasi, panjang_meter, foto) VALUES (?, ?, ?, ?)";
+    db.query(sql, [petugas_id, lokasi, panjang_meter, foto], (err, result) => {
         if (err) return res.status(500).json({ status: "error", pesan: err.message });
         res.json({ status: "sukses", pesan: "Laporan Gober disimpan!" });
     });
 });
 
+// === PERUBAHAN BARU: RUTE GET GOBER ===
 app.get('/kegiatan-gober', cekToken, (req, res) => {
-    db.query("SELECT * FROM kegiatan_gober ORDER BY tanggal_kegiatan DESC", (err, results) => {
+    const sql = `
+        SELECT kegiatan_gober.*, data_petugas.nama_petugas 
+        FROM kegiatan_gober 
+        JOIN data_petugas ON kegiatan_gober.petugas_id = data_petugas.id 
+        ORDER BY kegiatan_gober.tanggal_kegiatan DESC
+    `;
+    db.query(sql, (err, results) => {
         if (err) return res.status(500).json({ status: "error", pesan: err.message });
         res.json(results);
     });
 });
 
-// Rute Laporan Sampah (KINI MENERIMA UPLOAD FOTO)
+// === PERUBAHAN BARU: RUTE POST SAMPAH ===
 app.post('/kegiatan-sampah', cekToken, upload.single('foto'), (req, res) => {
-    const { petugas_id, nama_petugas, kategori_tugas, data_rw, berat_kiloan } = req.body;
-    
-    // Mesin X-Ray menangkap file foto
+    const { petugas_id, kategori_tugas, data_rw, berat_kiloan } = req.body;
     const foto = req.file ? req.file.path : null;
     
-    // Validasi pencegah kecurangan: Kalau tidak kirim foto, tolak laporannya!
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto timbangan!" });
 
-    const sql = "INSERT INTO kegiatan_sampah (petugas_id, nama_petugas, kategori_tugas, data_rw, berat_kiloan, foto) VALUES (?, ?, ?, ?, ?, ?)";
-    db.query(sql, [petugas_id, nama_petugas, kategori_tugas, data_rw, berat_kiloan, foto], (err, result) => {
+    const sql = "INSERT INTO kegiatan_sampah (petugas_id, kategori_tugas, data_rw, berat_kiloan, foto) VALUES (?, ?, ?, ?, ?)";
+    db.query(sql, [petugas_id, kategori_tugas, data_rw, berat_kiloan, foto], (err, result) => {
         if (err) return res.status(500).json({ status: "error", pesan: err.message });
         res.json({ status: "sukses", pesan: `Laporan ${kategori_tugas} beserta foto disimpan!` });
     });
 });
 
+// === PERUBAHAN BARU: RUTE GET SAMPAH ===
 app.get('/kegiatan-sampah', cekToken, (req, res) => {
-    db.query("SELECT * FROM kegiatan_sampah ORDER BY tanggal_kegiatan DESC", (err, results) => {
+    const sql = `
+        SELECT kegiatan_sampah.*, data_petugas.nama_petugas 
+        FROM kegiatan_sampah 
+        JOIN data_petugas ON kegiatan_sampah.petugas_id = data_petugas.id 
+        ORDER BY kegiatan_sampah.tanggal_kegiatan DESC
+    `;
+    db.query(sql, (err, results) => {
         if (err) return res.status(500).json({ status: "error", pesan: err.message });
         res.json(results);
     });
