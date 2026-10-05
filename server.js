@@ -5,6 +5,10 @@ const path = require('path');
 const multer = require('multer');
 require('dotenv').config();
 
+// === TAMBAHAN BCRYPT ===
+const bcrypt = require('bcrypt');
+// =======================
+
 // --- ALAT KEAMANAN BARU ---
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator'); 
@@ -24,7 +28,7 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: 'one_ekbang', // Ini akan otomatis bikin folder 'one_ekbang' di Cloudinary-mu
+    folder: 'one_ekbang',
     allowed_formats: ['jpg', 'png', 'jpeg', 'pdf', 'webp']
   },
 });
@@ -64,19 +68,17 @@ const db = mysql.createPool({
     ssl: {
         rejectUnauthorized: false 
     },
-    // Pengaturan kebal peluru:
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
 });
 
-// Tes apakah kolam koneksinya berhasil memancing data
 db.getConnection((err, conn) => {
     if (err) {
         console.log('Waduh, gagal masuk gudang:', err.message);
     } else {
         console.log('Gudang MySQL Berhasil Tersambung via Pool! 🚀');
-        conn.release(); // Lepaskan kembali koneksi ke kolam
+        conn.release(); 
     }
 });
 
@@ -107,12 +109,10 @@ const cekValidasi = (req, res, next) => {
     next();
 };
 
-
-// KUMPULAN RUTE API SERVER
 app.get('/', (req, res) => {
     res.send('API Backend Ekbang Berjalan Normal! 🚀');
 });
-// Rute GET Admin (DIGEMBOK)
+
 app.get('/admin', cekToken, (req,res) => {
     const usersSQL = 'SELECT * FROM admin';
     db.query(usersSQL, (err,hasil) => {
@@ -122,21 +122,31 @@ app.get('/admin', cekToken, (req,res) => {
 });
 
 // Rute POST Admin (DIGEMBOK & DIVALIDASI KETAT)
+// === TAMBAHAN BCRYPT: Mengubah callback menjadi async ===
 app.post('/admin', cekToken, [
     body('nik').isNumeric().withMessage('NIK wajib berupa angka!').isLength({ min: 16, max: 16 }).withMessage('NIK harus persis 16 digit!'),
     body('nama_lengkap').trim().escape().notEmpty().withMessage('Nama lengkap wajib diisi!'),
     body('username').trim().escape().notEmpty(),
     body('password').notEmpty()
-], cekValidasi, (req, res) => {
+], cekValidasi, async (req, res) => {
     const { nik, nama_lengkap, username, password } = req.body;
-    const sql = `INSERT INTO admin (nik, nama_lengkap, username, password) VALUES (?, ?, ?, ?)`;
-    db.query(sql, [nik, nama_lengkap, username, password], (err, result) => {
-        if (err) return res.status(500).json({ status: "error", pesan: "Gagal membuat akun." });
-        res.json({ status: "sukses", pesan: "Akun staf baru berhasil dibuat!" });
-    });
+    
+    try {
+        // === TAMBAHAN BCRYPT: Mengacak password sebelum disimpan ===
+        const saltRounds = 10;
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        
+        const sql = `INSERT INTO admin (nik, nama_lengkap, username, password) VALUES (?, ?, ?, ?)`;
+        // === TAMBAHAN BCRYPT: Kirim hashedPassword, BUKAN password asli ===
+        db.query(sql, [nik, nama_lengkap, username, hashedPassword], (err, result) => {
+            if (err) return res.status(500).json({ status: "error", pesan: "Gagal membuat akun." });
+            res.json({ status: "sukses", pesan: "Akun staf baru berhasil dibuat!" });
+        });
+    } catch (error) {
+        return res.status(500).json({ status: "error", pesan: "Gagal mengamankan password." });
+    }
 });
 
-// Rute DELETE Admin (DIGEMBOK)
 app.delete('/admin/:id', cekToken, (req, res) => {
     const idAdmin = req.params.id;
     const sql = "DELETE FROM admin WHERE id = ?";
@@ -146,14 +156,12 @@ app.delete('/admin/:id', cekToken, (req, res) => {
     });
 });
 
-// Rute POST Layanan (TERBUKA UTK PUBLIK + DIVALIDASI + FOTO HALAMAN)
 app.post('/layanan', upload.fields([
     { name: 'foto_ktp', maxCount: 1 }, { name: 'foto_kk', maxCount: 1 }, { name: 'surat_pengantar', maxCount: 1 },
     { name: 'sertifikat_tanah', maxCount: 1 }, { name: 'foto_kondisi_rumah', maxCount: 1 }, { name: 'foto_lokasi', maxCount: 1 },
     { name: 'sk_buruan_sae', maxCount: 1 }, { name: 'kebutuhan_tanaman', maxCount: 1 }, { name: 'dokumen_a1', maxCount: 1 },
     { name: 'dokumen_a2', maxCount: 1 }, { name: 'foto_rembuk', maxCount: 1 }, { name: 'daftar_hadir', maxCount: 1 },
     { name: 'ba_muskel', maxCount: 1 }, { name: 'foto_muskel', maxCount: 1 }, { name: 'foto_halaman', maxCount: 1 },
-    // TAMBAHAN 2 ALAT PENERIMA UNTUK SARPRAS DLH
     { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 }
 ]), [
     body('nik').isNumeric().withMessage('NIK wajib berupa angka!'),
@@ -166,12 +174,9 @@ app.post('/layanan', upload.fields([
         nik, nama, no_telepon, jenisLayanan, getNamaFile('foto_ktp'), getNamaFile('foto_kk'), getNamaFile('surat_pengantar'), 
         getNamaFile('sertifikat_tanah'), getNamaFile('foto_kondisi_rumah'), getNamaFile('foto_lokasi'), getNamaFile('sk_buruan_sae'), getNamaFile('kebutuhan_tanaman'), 
         getNamaFile('dokumen_a1'), getNamaFile('dokumen_a2'), getNamaFile('foto_rembuk'), getNamaFile('daftar_hadir'), getNamaFile('ba_muskel'), getNamaFile('foto_muskel'),
-        getNamaFile('foto_halaman'), 
-        // TAMBAHAN DATA UNTUK DIKIRIM KE DATABASE
-        getNamaFile('proposal_sarpras'), getNamaFile('foto_sarpras')
+        getNamaFile('foto_halaman'), getNamaFile('proposal_sarpras'), getNamaFile('foto_sarpras')
     ];
 
-    // UPDATE STRING SQL AGAR MENAMPUNG 2 KOLOM BARU & 2 TANDA TANYA (?) BARU
     const tambahLayananSQL = `INSERT INTO pengajuan_layanan 
         (nik_pemohon, nama_pemohon, no_telepon, jenis_layanan, foto_ktp, foto_kk, surat_pengantar, sertifikat_tanah, foto_kondisi_rumah, foto_lokasi, sk_buruan_sae, kebutuhan_tanaman, dokumen_a1, dokumen_a2, foto_rembuk, daftar_hadir, ba_muskel, foto_muskel, foto_halaman, proposal_sarpras, foto_sarpras) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; 
@@ -182,7 +187,6 @@ app.post('/layanan', upload.fields([
     });
 });
 
-// Rute GET Layanan (DIGEMBOK)
 app.get('/layanan', cekToken, (req, res) => {
     const sql = `SELECT * FROM pengajuan_layanan ORDER BY tanggal_pengajuan DESC`;
     db.query(sql, (err, results) => {
@@ -191,7 +195,6 @@ app.get('/layanan', cekToken, (req, res) => {
     });
 });
 
-// Rute PUT Layanan (DIGEMBOK)
 app.put('/layanan/:id', cekToken, (req, res) => {
     const sql = `UPDATE pengajuan_layanan SET status = ? WHERE id = ?`;
     db.query(sql, [req.body.status, req.params.id], (err, hasil) => {
@@ -206,22 +209,44 @@ app.post('/login', [
     body('password').trim().escape()
 ], cekValidasi, (req, res) => {
     const { username, password } = req.body;
-    const sql = `SELECT * FROM admin WHERE username = ? AND password = ?`;
     
-    db.query(sql, [username, password], (err, hasil) => {
+    // === TAMBAHAN BCRYPT: Hanya cari username-nya saja ===
+    const sql = `SELECT * FROM admin WHERE username = ?`;
+    
+    db.query(sql, [username], async (err, hasil) => {
         if (err) return res.status(500).json({ status: 'error', pesan: 'Kesalahan server' });
         
         if (hasil.length > 0) {
             const adminData = hasil[0];
-            const token = jwt.sign({ id: adminData.id, username: adminData.username }, KEY_NODEJS, { expiresIn: '1d' });
-            res.status(200).json({ status: 'sukses', pesan: 'Login Berhasil!', dataAdmin: adminData, token: token });
+            let passwordCocok = false;
+            
+            // === TAMBAHAN BCRYPT: Logika Anti-Terkunci (Auto-Upgrade Password) ===
+            // Cek apakah password di database sudah diacak (hash bcrypt biasanya diawali $2a$ atau $2b$)
+            if (adminData.password.startsWith('$2a$') || adminData.password.startsWith('$2b$')) {
+                passwordCocok = await bcrypt.compare(password, adminData.password);
+            } else {
+                // MASA TRANSISI: Jika password di database masih teks biasa (contoh: 'useradmin')
+                if (password === adminData.password) {
+                    passwordCocok = true;
+                    
+                    // Langsung otomatis enkripsi password lamanya di latar belakang
+                    const hashedPassword = await bcrypt.hash(password, 10);
+                    db.query('UPDATE admin SET password = ? WHERE id = ?', [hashedPassword, adminData.id]);
+                }
+            }
+            
+            if (passwordCocok) {
+                const token = jwt.sign({ id: adminData.id, username: adminData.username }, KEY_NODEJS, { expiresIn: '1d' });
+                res.status(200).json({ status: 'sukses', pesan: 'Login Berhasil!', dataAdmin: adminData, token: token });
+            } else {
+                res.status(401).json({ status: 'gagal', pesan: 'Username atau Password salah!' });
+            }
         } else {
             res.status(401).json({ status: 'gagal', pesan: 'Username atau Password salah!' });
         }
     });
 });
 
-// SISA RUTE LAINNYA (SEMUA DIGEMBOK DENGAN cekToken)
 app.get('/petugas', cekToken, (req, res) => {
     db.query("SELECT * FROM data_petugas ORDER BY id DESC", (err, results) => {
         if (err) return res.status(500).json({ status: "gagal", pesan: err.message });
@@ -243,7 +268,6 @@ app.post('/petugas', cekToken, upload.single('file_sk'), [
     });
 });
 
-// === PERUBAHAN BARU: RUTE POST GOBER ===
 app.post('/kegiatan-gober', cekToken, upload.single('foto'), (req, res) => {
     const { petugas_id, lokasi, panjang_meter } = req.body;
     const foto = req.file ? req.file.path : null;
@@ -256,7 +280,6 @@ app.post('/kegiatan-gober', cekToken, upload.single('foto'), (req, res) => {
     });
 });
 
-// === PERUBAHAN BARU: RUTE GET GOBER ===
 app.get('/kegiatan-gober', cekToken, (req, res) => {
     const sql = `
         SELECT kegiatan_gober.*, data_petugas.nama_petugas 
@@ -270,7 +293,6 @@ app.get('/kegiatan-gober', cekToken, (req, res) => {
     });
 });
 
-// === PERUBAHAN BARU: RUTE POST SAMPAH ===
 app.post('/kegiatan-sampah', cekToken, upload.single('foto'), (req, res) => {
     const { petugas_id, kategori_tugas, data_rw, berat_kiloan } = req.body;
     const foto = req.file ? req.file.path : null;
@@ -284,7 +306,6 @@ app.post('/kegiatan-sampah', cekToken, upload.single('foto'), (req, res) => {
     });
 });
 
-// === PERUBAHAN BARU: RUTE GET SAMPAH ===
 app.get('/kegiatan-sampah', cekToken, (req, res) => {
     const sql = `
         SELECT kegiatan_sampah.*, data_petugas.nama_petugas 
@@ -360,7 +381,6 @@ app.post('/peta-gis', cekToken, upload.single('foto_url'), [
     });
 });
 
-// Rute BARU: Mengubah Status Peta (Untuk Rutilahu)
 app.put('/peta-gis/:id/status', cekToken, (req, res) => {
     const sql = "UPDATE titik_peta_gis SET status = ? WHERE id = ?";
     db.query(sql, [req.body.status, req.params.id], (err, result) => {
@@ -379,7 +399,6 @@ app.delete('/peta-gis/:id', cekToken, (req, res) => {
     });
 });
 
-// 1. POST: Mengirim permintaan reset password (TIDAK DIGEMBOK)
 app.post('/lupa-password', [
     body('username').trim().escape().notEmpty().withMessage('Username tidak boleh kosong!')
 ], cekValidasi, (req, res) => {
@@ -393,7 +412,6 @@ app.post('/lupa-password', [
     });
 });
 
-// 2. GET: Mengambil notifikasi yang belum dibaca (DIGEMBOK JWT)
 app.get('/notifikasi', cekToken, (req, res) => {
     const sql = `SELECT * FROM notifikasi_sistem WHERE status = 'Belum Dibaca' ORDER BY tanggal DESC`;
     db.query(sql, (err, results) => {
@@ -402,7 +420,6 @@ app.get('/notifikasi', cekToken, (req, res) => {
     });
 });
 
-// 3. PUT: Menandai notifikasi sebagai 'Sudah Dibaca' (DIGEMBOK JWT)
 app.put('/notifikasi/:id', cekToken, (req, res) => {
     const idNotif = req.params.id;
     const sql = `UPDATE notifikasi_sistem SET status = 'Sudah Dibaca' WHERE id = ?`;
