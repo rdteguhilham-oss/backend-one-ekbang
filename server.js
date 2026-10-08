@@ -104,6 +104,15 @@ const cekToken = (req, res, next) => {
 const cekValidasi = (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        // Hapus file yang terlanjur terupload ke Cloudinary jika validasi teks gagal
+        if (req.file && req.file.filename) {
+            cloudinary.uploader.destroy(req.file.filename).catch(err => console.log('Gagal hapus cloudinary:', err));
+        }
+        if (req.files) {
+            Object.values(req.files).flat().forEach(f => {
+                if (f.filename) cloudinary.uploader.destroy(f.filename).catch(err => console.log('Gagal hapus cloudinary:', err));
+            });
+        }
         return res.status(400).json({ status: "gagal", pesan: errors.array()[0].msg });
     }
     next();
@@ -114,7 +123,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/admin', cekToken, (req,res) => {
-    const usersSQL = 'SELECT * FROM admin';
+    const usersSQL = 'SELECT id, nik, nama_lengkap, username FROM admin';
     db.query(usersSQL, (err,hasil) => {
         if(err) return res.send('Gagal mengambil data users dari Mysql!');
         res.json(hasil);
@@ -167,7 +176,7 @@ app.post('/layanan', upload.fields([
     body('nik').isNumeric().withMessage('NIK wajib berupa angka!'),
     body('nama').trim().escape()
 ], cekValidasi, (req, res) => {
-    const { nik, nama, no_telepon, jenisLayanan } = req.body;
+    const { nik, nama, no_telepon = null, jenisLayanan = null } = req.body;
     const getNamaFile = (namaField) => req.files && req.files[namaField] ? req.files[namaField][0].path : null;
 
     const dataKirim = [
@@ -221,25 +230,29 @@ app.post('/login', [
             let passwordCocok = false;
             
             // === TAMBAHAN BCRYPT: Logika Anti-Terkunci (Auto-Upgrade Password) ===
-            // Cek apakah password di database sudah diacak (hash bcrypt biasanya diawali $2a$ atau $2b$)
-            if (adminData.password.startsWith('$2a$') || adminData.password.startsWith('$2b$')) {
-                passwordCocok = await bcrypt.compare(password, adminData.password);
-            } else {
-                // MASA TRANSISI: Jika password di database masih teks biasa (contoh: 'useradmin')
-                if (password === adminData.password) {
-                    passwordCocok = true;
-                    
-                    // Langsung otomatis enkripsi password lamanya di latar belakang
-                    const hashedPassword = await bcrypt.hash(password, 10);
-                    db.query('UPDATE admin SET password = ? WHERE id = ?', [hashedPassword, adminData.id]);
+            try {
+                if (adminData.password && (adminData.password.startsWith('$2a$') || adminData.password.startsWith('$2b$'))) {
+                    passwordCocok = await bcrypt.compare(password, adminData.password);
+                } else {
+                    // MASA TRANSISI: Jika password di database masih teks biasa (contoh: 'useradmin')
+                    if (password === adminData.password) {
+                        passwordCocok = true;
+                        
+                        // Langsung otomatis enkripsi password lamanya di latar belakang
+                        const hashedPassword = await bcrypt.hash(password, 10);
+                        db.query('UPDATE admin SET password = ? WHERE id = ?', [hashedPassword, adminData.id]);
+                    }
                 }
-            }
-            
-            if (passwordCocok) {
-                const token = jwt.sign({ id: adminData.id, username: adminData.username }, KEY_NODEJS, { expiresIn: '1d' });
-                res.status(200).json({ status: 'sukses', pesan: 'Login Berhasil!', dataAdmin: adminData, token: token });
-            } else {
-                res.status(401).json({ status: 'gagal', pesan: 'Username atau Password salah!' });
+                
+                if (passwordCocok) {
+                    delete adminData.password; // Jangan kirim password ke frontend
+                    const token = jwt.sign({ id: adminData.id, username: adminData.username }, KEY_NODEJS, { expiresIn: '1d' });
+                    res.status(200).json({ status: 'sukses', pesan: 'Login Berhasil!', dataAdmin: adminData, token: token });
+                } else {
+                    res.status(401).json({ status: 'gagal', pesan: 'Username atau Password salah!' });
+                }
+            } catch (error) {
+                res.status(500).json({ status: 'error', pesan: 'Terjadi kesalahan saat verifikasi password' });
             }
         } else {
             res.status(401).json({ status: 'gagal', pesan: 'Username atau Password salah!' });
@@ -257,7 +270,7 @@ app.get('/petugas', cekToken, (req, res) => {
 app.post('/petugas', cekToken, upload.single('file_sk'), [
     body('nama_petugas').trim().escape()
 ], cekValidasi, (req, res) => {
-    const { nama_petugas, kategori_petugas, wilayah, no_sk } = req.body;
+    const { nama_petugas, kategori_petugas = null, wilayah = null, no_sk = null } = req.body;
     const file_sk = req.file ? req.file.path : null;
     if (!file_sk) return res.status(400).json({ status: "gagal", pesan: "File SK wajib diunggah!" });
 
@@ -269,7 +282,7 @@ app.post('/petugas', cekToken, upload.single('file_sk'), [
 });
 
 app.post('/kegiatan-gober', cekToken, upload.single('foto'), (req, res) => {
-    const { petugas_id, lokasi, panjang_meter } = req.body;
+    const { petugas_id = null, lokasi = null, panjang_meter = null } = req.body;
     const foto = req.file ? req.file.path : null;
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto!" });
 
@@ -294,7 +307,7 @@ app.get('/kegiatan-gober', cekToken, (req, res) => {
 });
 
 app.post('/kegiatan-sampah', cekToken, upload.single('foto'), (req, res) => {
-    const { petugas_id, kategori_tugas, data_rw, berat_kiloan } = req.body;
+    const { petugas_id = null, kategori_tugas = null, data_rw = null, berat_kiloan = null } = req.body;
     const foto = req.file ? req.file.path : null;
     
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto timbangan!" });
@@ -320,7 +333,7 @@ app.get('/kegiatan-sampah', cekToken, (req, res) => {
 });
 
 app.post('/kegiatan-agenda', cekToken, upload.single('foto_dokumentasi'), (req, res) => {
-    const { judul_agenda, kategori_agenda, tanggal_waktu, lokasi, catatan_reminder } = req.body;
+    const { judul_agenda = null, kategori_agenda = null, tanggal_waktu = null, lokasi = null, catatan_reminder = null } = req.body;
     const foto_dokumentasi = req.file ? req.file.path : null;
 
     const sql = `INSERT INTO kegiatan_agenda (judul_agenda, kategori_agenda, tanggal_waktu, lokasi, catatan_reminder, foto_dokumentasi) VALUES (?, ?, ?, ?, ?, ?)`;
@@ -369,7 +382,7 @@ app.post('/peta-gis', cekToken, upload.single('foto_url'), [
     body('nama_lokasi').trim(),
     body('alamat').trim()
 ], cekValidasi, (req, res) => {
-    const { kategori_lokasi, nama_lokasi, alamat, latitude, longitude, status, ketua, luas_lahan, data_rw } = req.body;
+    const { kategori_lokasi = null, nama_lokasi = null, alamat = null, latitude = null, longitude = null, status = null, ketua = null, luas_lahan = null, data_rw = null } = req.body;
     const foto = req.file ? req.file.path : null;
 
     const sql = `INSERT INTO titik_peta_gis (kategori_lokasi, nama_lokasi, alamat, latitude, longitude, foto_url, status, ketua, luas_lahan, data_rw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
