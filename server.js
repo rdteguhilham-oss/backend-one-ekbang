@@ -77,7 +77,7 @@ db.getConnection((err, conn) => {
     if (err) {
         console.log('Waduh, gagal masuk gudang:', err.message);
     } else {
-        console.log('Gudang MySQL Berhasil Tersambung via Pool! 🚀');
+        console.log('DATABASE MYSQL aman terkoneksi! 🗄️');
         conn.release(); 
     }
 });
