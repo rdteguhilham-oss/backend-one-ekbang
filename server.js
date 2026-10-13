@@ -118,6 +118,52 @@ const cekValidasi = (req, res, next) => {
     next();
 };
 
+const hapusFileSampah = (fileObj) => {
+    if (!fileObj) return;
+    if (fileObj.filename && typeof cloudinary !== 'undefined' && cloudinary.uploader) {
+        cloudinary.uploader.destroy(fileObj.filename).catch(() => {});
+    }
+    if (fileObj.path && fs.existsSync(fileObj.path)) {
+        fs.unlink(fileObj.path, () => {});
+    }
+};
+
+// === TARGET 3: PENANGKAL DOUBLE-SUBMIT (IDEMPOTENCY SEDERHANA) ===
+const requestCache = new Map();
+
+// Pembersih memori otomatis setiap 30 detik
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, timestamp] of requestCache.entries()) {
+        if (now - timestamp > 5000) {
+            requestCache.delete(key);
+        }
+    }
+}, 30000);
+
+const antiDoubleSubmit = (req, res, next) => {
+    const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
+    const bodyIdentitas = req.body ? (req.body.nik || req.body.petugas_id || req.body.nama || req.body.judul_agenda || req.body.nama_lokasi || req.body.username || '') : '';
+    const sidikJari = `${clientIp}_${req.method}_${req.originalUrl}_${bodyIdentitas}`;
+
+    const now = Date.now();
+    if (requestCache.has(sidikJari)) {
+        const waktuTerakhir = requestCache.get(sidikJari);
+        // Jika permintaan persis sama masuk kurang dari 3 detik (double click cepat)
+        if (now - waktuTerakhir < 3000) {
+            if (req.file) hapusFileSampah(req.file);
+            if (req.files) Object.values(req.files).flat().forEach(hapusFileSampah);
+            return res.status(429).json({
+                status: "gagal",
+                pesan: "Permintaan sedang diproses! Harap tunggu beberapa detik dan jangan menekan tombol berulang kali."
+            });
+        }
+    }
+
+    requestCache.set(sidikJari, now);
+    next();
+};
+
 app.get('/', (req, res) => {
     res.send('API Backend Ekbang Berjalan Normal! 🚀');
 });
@@ -137,7 +183,7 @@ app.post('/admin', cekToken, [
     body('nama_lengkap').trim().escape().notEmpty().withMessage('Nama lengkap wajib diisi!'),
     body('username').trim().escape().notEmpty(),
     body('password').notEmpty()
-], cekValidasi, async (req, res) => {
+], cekValidasi, antiDoubleSubmit, async (req, res) => {
     const { nik, nama_lengkap, username, password } = req.body;
     
     try {
@@ -175,7 +221,7 @@ app.post('/layanan', upload.fields([
 ]), [
     body('nik').isNumeric().withMessage('NIK wajib berupa angka!'),
     body('nama').trim().escape()
-], cekValidasi, (req, res) => {
+], cekValidasi, antiDoubleSubmit, (req, res) => {
     const { nik, nama, no_telepon = null, jenisLayanan = null } = req.body;
     const getNamaFile = (namaField) => req.files && req.files[namaField] ? req.files[namaField][0].path : null;
 
@@ -269,7 +315,7 @@ app.get('/petugas', cekToken, (req, res) => {
 
 app.post('/petugas', cekToken, upload.single('file_sk'), [
     body('nama_petugas').trim().escape()
-], cekValidasi, (req, res) => {
+], cekValidasi, antiDoubleSubmit, (req, res) => {
     const { nama_petugas, kategori_petugas = null, wilayah = null, no_sk = null } = req.body;
     const file_sk = req.file ? req.file.path : null;
     if (!file_sk) return res.status(400).json({ status: "gagal", pesan: "File SK wajib diunggah!" });
@@ -281,7 +327,7 @@ app.post('/petugas', cekToken, upload.single('file_sk'), [
     });
 });
 
-app.post('/kegiatan-gober', cekToken, upload.single('foto'), (req, res) => {
+app.post('/kegiatan-gober', cekToken, upload.single('foto'), antiDoubleSubmit, (req, res) => {
     const { petugas_id = null, lokasi = null, panjang_meter = null } = req.body;
     const foto = req.file ? req.file.path : null;
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto!" });
@@ -306,7 +352,7 @@ app.get('/kegiatan-gober', cekToken, (req, res) => {
     });
 });
 
-app.post('/kegiatan-sampah', cekToken, upload.single('foto'), (req, res) => {
+app.post('/kegiatan-sampah', cekToken, upload.single('foto'), antiDoubleSubmit, (req, res) => {
     const { petugas_id = null, kategori_tugas = null, data_rw = null, berat_kiloan = null } = req.body;
     const foto = req.file ? req.file.path : null;
     
@@ -332,7 +378,7 @@ app.get('/kegiatan-sampah', cekToken, (req, res) => {
     });
 });
 
-app.post('/kegiatan-agenda', cekToken, upload.single('foto_dokumentasi'), (req, res) => {
+app.post('/kegiatan-agenda', cekToken, upload.single('foto_dokumentasi'), antiDoubleSubmit, (req, res) => {
     const { judul_agenda = null, kategori_agenda = null, tanggal_waktu = null, lokasi = null, catatan_reminder = null } = req.body;
     const foto_dokumentasi = req.file ? req.file.path : null;
 
@@ -381,7 +427,7 @@ app.get('/peta-gis', cekToken, (req, res) => {
 app.post('/peta-gis', cekToken, upload.single('foto_url'), [
     body('nama_lokasi').trim(),
     body('alamat').trim()
-], cekValidasi, (req, res) => {
+], cekValidasi, antiDoubleSubmit, (req, res) => {
     const { kategori_lokasi = null, nama_lokasi = null, alamat = null, latitude = null, longitude = null, status = null, ketua = null, luas_lahan = null, data_rw = null } = req.body;
     const foto = req.file ? req.file.path : null;
 
