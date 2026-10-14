@@ -65,6 +65,8 @@ const db = mysql.createPool({
     user: 'avnadmin',
     password: process.env.DB_PASSWORD, 
     database: 'defaultdb',
+    dateStrings: true,
+    timezone: '+07:00',
     ssl: {
         rejectUnauthorized: false 
     },
@@ -332,8 +334,15 @@ app.post('/kegiatan-gober', cekToken, upload.single('foto'), antiDoubleSubmit, (
     const foto = req.file ? req.file.path : null;
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto!" });
 
+    // Sanitasi panjang_meter agar aman jika user mengirimkan teks seperti "30m" atau "30 meter"
+    let cleanedPanjang = 0;
+    if (panjang_meter !== null && panjang_meter !== undefined) {
+        const parsed = parseInt(String(panjang_meter).replace(/[^0-9]/g, ''), 10);
+        cleanedPanjang = isNaN(parsed) ? 0 : parsed;
+    }
+
     const sql = "INSERT INTO kegiatan_gober (petugas_id, lokasi, panjang_meter, foto) VALUES (?, ?, ?, ?)";
-    db.query(sql, [petugas_id, lokasi, panjang_meter, foto], (err, result) => {
+    db.query(sql, [petugas_id, lokasi, cleanedPanjang, foto], (err, result) => {
         if (err) return res.status(500).json({ status: "error", pesan: err.message });
         res.json({ status: "sukses", pesan: "Laporan Gober disimpan!" });
     });
@@ -358,8 +367,10 @@ app.post('/kegiatan-sampah', cekToken, upload.single('foto'), antiDoubleSubmit, 
     
     if (!foto) return res.status(400).json({ status: "gagal", pesan: "Wajib melampirkan foto timbangan!" });
 
+    const cleanedBerat = parseFloat(String(berat_kiloan).replace(',', '.')) || 0;
+
     const sql = "INSERT INTO kegiatan_sampah (petugas_id, kategori_tugas, data_rw, berat_kiloan, foto) VALUES (?, ?, ?, ?, ?)";
-    db.query(sql, [petugas_id, kategori_tugas, data_rw, berat_kiloan, foto], (err, result) => {
+    db.query(sql, [petugas_id, kategori_tugas, data_rw, cleanedBerat, foto], (err, result) => {
         if (err) return res.status(500).json({ status: "error", pesan: err.message });
         res.json({ status: "sukses", pesan: `Laporan ${kategori_tugas} beserta foto disimpan!` });
     });
@@ -379,11 +390,15 @@ app.get('/kegiatan-sampah', cekToken, (req, res) => {
 });
 
 app.post('/kegiatan-agenda', cekToken, upload.single('foto_dokumentasi'), antiDoubleSubmit, (req, res) => {
-    const { judul_agenda = null, kategori_agenda = null, tanggal_waktu = null, lokasi = null, catatan_reminder = null } = req.body;
+    const { judul_agenda = null, kategori_agenda = null, tanggal_waktu = null, waktu_selesai = null, lokasi = null, catatan_reminder = null } = req.body;
     const foto_dokumentasi = req.file ? req.file.path : null;
 
-    const sql = `INSERT INTO kegiatan_agenda (judul_agenda, kategori_agenda, tanggal_waktu, lokasi, catatan_reminder, foto_dokumentasi) VALUES (?, ?, ?, ?, ?, ?)`;
-    db.query(sql, [judul_agenda, kategori_agenda, tanggal_waktu, lokasi, catatan_reminder, foto_dokumentasi], (err, result) => {
+    const formatDateTime = (val) => (val && typeof val === 'string' && val.trim() !== '') ? val.replace('T', ' ') : null;
+    const cleanedTanggalWaktu = formatDateTime(tanggal_waktu);
+    const cleanedSelesai = formatDateTime(waktu_selesai);
+
+    const sql = `INSERT INTO kegiatan_agenda (judul_agenda, kategori_agenda, tanggal_waktu, waktu_selesai, lokasi, catatan_reminder, foto_dokumentasi) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+    db.query(sql, [judul_agenda, kategori_agenda, cleanedTanggalWaktu, cleanedSelesai, lokasi, catatan_reminder, foto_dokumentasi], (err, result) => {
         if (err) return res.status(500).json({ status: "error", pesan: err.message });
         res.json({ status: "sukses", pesan: "Agenda berhasil dijadwalkan!" });
     });
