@@ -84,6 +84,10 @@ db.getConnection((err, conn) => {
     }
 });
 
+db.on('error', (err) => {
+    console.error('Koneksi pool database mengalami error tak terduga:', err.message);
+});
+
 // === TARGET 1: SATPAM PENGECEK KUNCI (MIDDLEWARE JWT) ===
 const cekToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -173,9 +177,9 @@ app.get('/', (req, res) => {
 app.get('/admin', cekToken, (req,res) => {
     const usersSQL = 'SELECT id, nik, nama_lengkap, username FROM admin';
     db.query(usersSQL, (err,hasil) => {
-        if(err) return res.send('Gagal mengambil data users dari Mysql!');
+        if(err) return res.status(500).json({ status: "error", pesan: "Gagal mengambil data staf admin dari database." });
         res.json(hasil);
-    })
+    });
 });
 
 // Rute POST Admin (DIGEMBOK & DIVALIDASI KETAT)
@@ -221,7 +225,7 @@ app.post('/layanan', upload.fields([
     { name: 'ba_muskel', maxCount: 1 }, { name: 'foto_muskel', maxCount: 1 }, { name: 'foto_halaman', maxCount: 1 },
     { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 }
 ]), [
-    body('nik').isNumeric().withMessage('NIK wajib berupa angka!'),
+    body('nik').isNumeric().withMessage('NIK wajib berupa angka!').isLength({ min: 16, max: 16 }).withMessage('NIK harus persis 16 digit!'),
     body('nama').trim().escape()
 ], cekValidasi, antiDoubleSubmit, (req, res) => {
     const { nik, nama, no_telepon = null, jenisLayanan = null } = req.body;
@@ -239,7 +243,7 @@ app.post('/layanan', upload.fields([
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; 
     
     db.query(tambahLayananSQL, dataKirim, (err, hasil) => {
-        if(err) return res.status(500).send('Gagal menyimpan data baru ke database!');
+        if(err) return res.status(500).json({ status: "error", pesan: "Gagal menyimpan data baru ke database!" });
         res.json({ status: 'sukses', pesan: 'Data layanan berhasil ditambahkan!', hasil: hasil });
     });
 });
@@ -468,8 +472,8 @@ app.delete('/peta-gis/:id', cekToken, (req, res) => {
     const sql = "DELETE FROM titik_peta_gis WHERE id = ?"; 
     
     db.query(sql, [idTitikPeta], (err, result) => {
-        if (err) return res.status(500).json({ status: "error", pesan: "Gagal menghapus titik pada peta gis!." });
-        res.json({ status: "sukses", pesan: "Titik peta berhasil di hapus!" });
+        if (err) return res.status(500).json({ status: "error", pesan: "Gagal menghapus titik pada peta GIS." });
+        res.json({ status: "sukses", pesan: "Titik peta berhasil dihapus!" });
     });
 });
 
@@ -477,12 +481,20 @@ app.post('/lupa-password', [
     body('username').trim().escape().notEmpty().withMessage('Username tidak boleh kosong!')
 ], cekValidasi, (req, res) => {
     const { username } = req.body;
-    const pesan = `Staf dengan username '${username}' meminta reset password.`;
 
-    const sql = `INSERT INTO notifikasi_sistem (username_staf, pesan) VALUES (?, ?)`;
-    db.query(sql, [username, pesan], (err, result) => {
-        if (err) return res.status(500).json({ status: "error", pesan: "Gagal mengirim permintaan." });
-        res.json({ status: "sukses", pesan: "Permintaan reset password berhasil dikirim ke Master Admin." });
+    // Pastikan username memang terdaftar di tabel admin agar tidak terjadi spam
+    db.query('SELECT id FROM admin WHERE username = ?', [username], (errCek, hasilCek) => {
+        if (errCek) return res.status(500).json({ status: "error", pesan: "Gagal memeriksa data pengguna." });
+        if (hasilCek.length === 0) {
+            return res.status(404).json({ status: "gagal", pesan: `Username '${username}' tidak terdaftar sebagai staf admin.` });
+        }
+
+        const pesan = `Staf dengan username '${username}' meminta reset password.`;
+        const sql = `INSERT INTO notifikasi_sistem (username_staf, pesan) VALUES (?, ?)`;
+        db.query(sql, [username, pesan], (err, result) => {
+            if (err) return res.status(500).json({ status: "error", pesan: "Gagal mengirim permintaan reset password." });
+            res.json({ status: "sukses", pesan: "Permintaan reset password berhasil dikirim ke Master Admin." });
+        });
     });
 });
 
