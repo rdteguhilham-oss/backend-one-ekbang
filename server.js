@@ -12,7 +12,7 @@ const bcrypt = require('bcrypt');
 // --- ALAT KEAMANAN BARU ---
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator'); 
-const KEY_NODEJS = process.env.KEY_NODE_JS || process.env.key_node_js || process.env.JWT_SECRET;
+const KEY_NODEJS = process.env.KEY_NODE_JS || process.env.KEY_NODEJS || process.env.key_node_js || process.env.JWT_SECRET;
 if (!KEY_NODEJS) {
     console.error("PERINGATAN KEAMANAN: Variabel KEY_NODE_JS belum disetel di file .env!");
 }
@@ -92,6 +92,14 @@ app.use((req, res, next) => {
     next();
 });
 
+// Penyesuaian rute agar kompatibel baik di localhost maupun di cPanel Passenger (prefix /api)
+app.use((req, res, next) => {
+    if (req.url.startsWith('/api')) {
+        req.url = req.url.replace(/^\/api/, '') || '/';
+    }
+    next();
+});
+
 app.use(express.json()); 
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -119,14 +127,40 @@ db.getConnection((err, conn) => {
         conn.query("SHOW COLUMNS FROM data_petugas LIKE 'status'", (errCol, rows) => {
             if (!errCol && rows && rows.length === 0) {
                 conn.query("ALTER TABLE data_petugas ADD COLUMN status VARCHAR(20) DEFAULT 'Aktif'", (errAlter) => {
-                    conn.release();
                     if (errAlter) console.error("Gagal menambahkan kolom status:", errAlter.message);
                     else console.log("Kolom status petugas berhasil disiapkan! ✅");
                 });
-            } else {
-                conn.release();
             }
         });
+
+        // Menjamin tersedianya kolom-kolom baru pada pengajuan_layanan (Kirmir, Jalan, UMKM, Lainnya)
+        const kolomBaruLayanan = [
+            { nama: 'alamat_rusak', tipe: 'TEXT NULL' },
+            { nama: 'foto_bukti', tipe: 'VARCHAR(255) NULL' },
+            { nama: 'nama_usaha', tipe: 'VARCHAR(150) NULL' },
+            { nama: 'jenis_usaha', tipe: 'VARCHAR(100) NULL' },
+            { nama: 'no_nib_suket', tipe: 'VARCHAR(100) NULL' },
+            { nama: 'dokumen_pendukung', tipe: 'VARCHAR(255) NULL' }
+        ];
+
+        kolomBaruLayanan.forEach(col => {
+            conn.query(`SHOW COLUMNS FROM pengajuan_layanan LIKE '${col.nama}'`, (errCol, rows) => {
+                if (!errCol && rows && rows.length === 0) {
+                    conn.query(`ALTER TABLE pengajuan_layanan ADD COLUMN ${col.nama} ${col.tipe}`, (errAlter) => {
+                        if (errAlter) console.error(`Gagal menambah kolom ${col.nama}:`, errAlter.message);
+                        else console.log(`Kolom ${col.nama} pada pengajuan_layanan berhasil disiapkan! ✅`);
+                    });
+                }
+            });
+        });
+
+        // Menjamin kolom jenis_layanan cukup panjang (VARCHAR 255) agar pengajuan lainnya tidak terpotong
+        conn.query("ALTER TABLE pengajuan_layanan MODIFY COLUMN jenis_layanan VARCHAR(255) NOT NULL", (errAlter) => {
+            if (errAlter) console.error("Gagal memperlebar kolom jenis_layanan:", errAlter.message);
+            else console.log("Kolom jenis_layanan berhasil diperlebar ke VARCHAR(255)! 🚀");
+        });
+
+        conn.release();
     }
 });
 
@@ -282,24 +316,29 @@ app.post('/layanan', upload.fields([
     { name: 'sk_buruan_sae', maxCount: 1 }, { name: 'kebutuhan_tanaman', maxCount: 1 }, { name: 'dokumen_a1', maxCount: 1 },
     { name: 'dokumen_a2', maxCount: 1 }, { name: 'foto_rembuk', maxCount: 1 }, { name: 'daftar_hadir', maxCount: 1 },
     { name: 'ba_muskel', maxCount: 1 }, { name: 'foto_muskel', maxCount: 1 }, { name: 'foto_halaman', maxCount: 1 },
-    { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 }
+    { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 },
+    { name: 'foto_bukti', maxCount: 1 }, { name: 'dokumen_pendukung', maxCount: 1 }
 ]), [
     body('nik').isNumeric().withMessage('NIK wajib berupa angka!').isLength({ min: 16, max: 16 }).withMessage('NIK harus persis 16 digit!'),
     body('nama').trim().escape()
 ], cekValidasi, antiDoubleSubmit, (req, res) => {
-    const { nik, nama, no_telepon = null, jenisLayanan = null } = req.body;
+    const { 
+        nik, nama, no_telepon = null, jenisLayanan = null,
+        alamat_rusak = null, nama_usaha = null, jenis_usaha = null, no_nib_suket = null
+    } = req.body;
     const getNamaFile = (namaField) => req.files && req.files[namaField] ? req.files[namaField][0].filename : null;
 
     const dataKirim = [
         nik, nama, no_telepon, jenisLayanan, getNamaFile('foto_ktp'), getNamaFile('foto_kk'), getNamaFile('surat_pengantar'), 
         getNamaFile('sertifikat_tanah'), getNamaFile('foto_kondisi_rumah'), getNamaFile('foto_lokasi'), getNamaFile('sk_buruan_sae'), getNamaFile('kebutuhan_tanaman'), 
         getNamaFile('dokumen_a1'), getNamaFile('dokumen_a2'), getNamaFile('foto_rembuk'), getNamaFile('daftar_hadir'), getNamaFile('ba_muskel'), getNamaFile('foto_muskel'),
-        getNamaFile('foto_halaman'), getNamaFile('proposal_sarpras'), getNamaFile('foto_sarpras')
+        getNamaFile('foto_halaman'), getNamaFile('proposal_sarpras'), getNamaFile('foto_sarpras'),
+        alamat_rusak || null, getNamaFile('foto_bukti'), nama_usaha || null, jenis_usaha || null, no_nib_suket || null, getNamaFile('dokumen_pendukung')
     ];
 
     const tambahLayananSQL = `INSERT INTO pengajuan_layanan 
-        (nik_pemohon, nama_pemohon, no_telepon, jenis_layanan, foto_ktp, foto_kk, surat_pengantar, sertifikat_tanah, foto_kondisi_rumah, foto_lokasi, sk_buruan_sae, kebutuhan_tanaman, dokumen_a1, dokumen_a2, foto_rembuk, daftar_hadir, ba_muskel, foto_muskel, foto_halaman, proposal_sarpras, foto_sarpras) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; 
+        (nik_pemohon, nama_pemohon, no_telepon, jenis_layanan, foto_ktp, foto_kk, surat_pengantar, sertifikat_tanah, foto_kondisi_rumah, foto_lokasi, sk_buruan_sae, kebutuhan_tanaman, dokumen_a1, dokumen_a2, foto_rembuk, daftar_hadir, ba_muskel, foto_muskel, foto_halaman, proposal_sarpras, foto_sarpras, alamat_rusak, foto_bukti, nama_usaha, jenis_usaha, no_nib_suket, dokumen_pendukung) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; 
     
     db.query(tambahLayananSQL, dataKirim, (err, hasil) => {
         if(err) return res.status(500).json({ status: "error", pesan: "Gagal menyimpan data baru ke database!" });
@@ -321,8 +360,23 @@ const uploadLayananEdit = upload.fields([
     { name: 'sk_buruan_sae', maxCount: 1 }, { name: 'kebutuhan_tanaman', maxCount: 1 }, { name: 'dokumen_a1', maxCount: 1 },
     { name: 'dokumen_a2', maxCount: 1 }, { name: 'foto_rembuk', maxCount: 1 }, { name: 'daftar_hadir', maxCount: 1 },
     { name: 'ba_muskel', maxCount: 1 }, { name: 'foto_muskel', maxCount: 1 }, { name: 'foto_halaman', maxCount: 1 },
-    { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 }
+    { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 },
+    { name: 'foto_bukti', maxCount: 1 }, { name: 'dokumen_pendukung', maxCount: 1 }
 ]);
+
+// RUTE KHUSUS UPDATE STATUS PENGAJUAN (CEPAT, RINGAN, TANPA MULTIPART)
+app.put('/layanan/:id/status', cekToken, (req, res) => {
+    const id = req.params.id;
+    const { status } = req.body;
+    if (!status) {
+        return res.status(400).json({ status: 'gagal', pesan: 'Status pengajuan wajib diisi!' });
+    }
+    const sql = `UPDATE pengajuan_layanan SET status = ? WHERE id = ?`;
+    db.query(sql, [status, id], (err, hasil) => {
+        if (err) return res.status(500).json({ status: 'error', pesan: 'Gagal memperbarui status pengajuan.' });
+        res.status(200).json({ status: 'sukses', pesan: `Status pengajuan berhasil diubah menjadi ${status}!` });
+    });
+});
 
 app.put('/layanan/:id', cekToken, uploadLayananEdit, [
     body('nik_pemohon').optional({ checkFalsy: true }).isNumeric().withMessage('NIK wajib berupa angka!').isLength({ min: 16, max: 16 }).withMessage('NIK harus persis 16 digit!'),
@@ -331,13 +385,16 @@ app.put('/layanan/:id', cekToken, uploadLayananEdit, [
     body('status').optional({ checkFalsy: true }).trim()
 ], cekValidasi, (req, res) => {
     const id = req.params.id;
-    const { status, nik_pemohon, nama_pemohon, no_telepon } = req.body;
+    const { 
+        status, nik_pemohon, nama_pemohon, no_telepon,
+        alamat_rusak, nama_usaha, jenis_usaha, no_nib_suket
+    } = req.body;
 
     const fileFields = [
         'foto_ktp', 'foto_kk', 'surat_pengantar', 'sertifikat_tanah', 'foto_kondisi_rumah',
         'foto_lokasi', 'sk_buruan_sae', 'kebutuhan_tanaman', 'dokumen_a1', 'dokumen_a2',
         'foto_rembuk', 'daftar_hadir', 'ba_muskel', 'foto_muskel', 'foto_halaman',
-        'proposal_sarpras', 'foto_sarpras'
+        'proposal_sarpras', 'foto_sarpras', 'foto_bukti', 'dokumen_pendukung'
     ];
 
     const uploadedFiles = {};
@@ -352,7 +409,7 @@ app.put('/layanan/:id', cekToken, uploadLayananEdit, [
     const hasFiles = Object.keys(uploadedFiles).length > 0;
 
     // Jika hanya status yang dikirim (misal dari tombol cepat Proses/Selesai) tanpa perubahan berkas/data lain
-    if (status && !nik_pemohon && !nama_pemohon && !no_telepon && !hasFiles) {
+    if (status && !nik_pemohon && !nama_pemohon && !no_telepon && !alamat_rusak && !nama_usaha && !jenis_usaha && !no_nib_suket && !hasFiles) {
         const sql = `UPDATE pengajuan_layanan SET status = ? WHERE id = ?`;
         return db.query(sql, [status, id], (err, hasil) => {
             if (err) return res.status(500).json({ status: 'error', pesan: 'Gagal memperbarui status.' });
@@ -376,9 +433,16 @@ app.put('/layanan/:id', cekToken, uploadLayananEdit, [
                 'nik_pemohon = COALESCE(?, nik_pemohon)',
                 'nama_pemohon = COALESCE(?, nama_pemohon)',
                 'no_telepon = COALESCE(?, no_telepon)',
-                'status = COALESCE(?, status)'
+                'status = COALESCE(?, status)',
+                'alamat_rusak = COALESCE(?, alamat_rusak)',
+                'nama_usaha = COALESCE(?, nama_usaha)',
+                'jenis_usaha = COALESCE(?, jenis_usaha)',
+                'no_nib_suket = COALESCE(?, no_nib_suket)'
             ];
-            const values = [nik_pemohon || null, nama_pemohon || null, no_telepon || null, status || null];
+            const values = [
+                nik_pemohon || null, nama_pemohon || null, no_telepon || null, status || null,
+                alamat_rusak || null, nama_usaha || null, jenis_usaha || null, no_nib_suket || null
+            ];
 
             for (const [col, pathVal] of Object.entries(uploadedFiles)) {
                 setClauses.push(`${col} = ?`);
@@ -398,14 +462,51 @@ app.put('/layanan/:id', cekToken, uploadLayananEdit, [
             nik_pemohon = COALESCE(?, nik_pemohon),
             nama_pemohon = COALESCE(?, nama_pemohon),
             no_telepon = COALESCE(?, no_telepon),
-            status = COALESCE(?, status)
+            status = COALESCE(?, status),
+            alamat_rusak = COALESCE(?, alamat_rusak),
+            nama_usaha = COALESCE(?, nama_usaha),
+            jenis_usaha = COALESCE(?, jenis_usaha),
+            no_nib_suket = COALESCE(?, no_nib_suket)
             WHERE id = ?`;
 
-        db.query(sql, [nik_pemohon || null, nama_pemohon || null, no_telepon || null, status || null, id], (err, hasil) => {
+        db.query(sql, [
+            nik_pemohon || null, nama_pemohon || null, no_telepon || null, status || null,
+            alamat_rusak || null, nama_usaha || null, jenis_usaha || null, no_nib_suket || null,
+            id
+        ], (err, hasil) => {
             if (err) return res.status(500).json({ status: 'error', pesan: 'Gagal memperbarui data pengajuan.' });
             res.status(200).json({ status: 'sukses', pesan: 'Data pengajuan pemohon berhasil diperbarui!' });
         });
     }
+});
+
+app.delete('/layanan/:id', cekToken, (req, res) => {
+    const id = req.params.id;
+    const fileFields = [
+        'foto_ktp', 'foto_kk', 'surat_pengantar', 'sertifikat_tanah', 'foto_kondisi_rumah',
+        'foto_lokasi', 'sk_buruan_sae', 'kebutuhan_tanaman', 'dokumen_a1', 'dokumen_a2',
+        'foto_rembuk', 'daftar_hadir', 'ba_muskel', 'foto_muskel', 'foto_halaman',
+        'proposal_sarpras', 'foto_sarpras', 'foto_bukti', 'dokumen_pendukung'
+    ];
+    const colsToSelect = fileFields.join(', ');
+
+    db.query(`SELECT ${colsToSelect} FROM pengajuan_layanan WHERE id = ?`, [id], (errSelect, rows) => {
+        if (errSelect) return res.status(500).json({ status: "error", pesan: "Gagal mencari berkas pengajuan." });
+        
+        if (rows && rows[0]) {
+            fileFields.forEach(col => {
+                if (rows[0][col]) {
+                    hapusFileLokal(rows[0][col]);
+                }
+            });
+        }
+
+        const sql = "DELETE FROM pengajuan_layanan WHERE id = ?";
+        db.query(sql, [id], (errDelete, result) => {
+            if (errDelete) return res.status(500).json({ status: "error", pesan: "Gagal menghapus data pengajuan dari database." });
+            res.json({ status: "sukses", pesan: "Data pengajuan dan seluruh berkas lampiran berhasil dihapus secara permanen!" });
+        });
+    });
 });
 
 // RUTE POST LOGIN (TERBUKA UTK PUBLIK + MENCETAK TOKEN)
