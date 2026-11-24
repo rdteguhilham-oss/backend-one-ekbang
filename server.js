@@ -9,6 +9,11 @@ require('dotenv').config();
 const bcrypt = require('bcrypt');
 // =======================
 
+// === TAMBAHAN KEAMANAN OWASP (HELMET & RATE-LIMIT) ===
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+// ===================================================
+
 // --- ALAT KEAMANAN BARU ---
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator'); 
@@ -78,9 +83,38 @@ const hapusFileLokal = (fileIdentifier) => {
 
 const app = express();
 
+// === KEAMANAN OWASP 1: HELMET (HTTP SECURITY HEADERS) ===
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// === KEAMANAN OWASP 2: RATE LIMITER (BRUTE FORCE DEFENSE) ===
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 menit
+    max: 5, // Maksimal 5 percobaan login gagal per IP dalam rentang 15 menit
+    message: { status: 'gagal', pesan: 'Terlalu banyak percobaan login gagal. Demi keamanan sistem, silakan coba lagi setelah 15 menit!' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true // Percobaan login sukses tidak dihitung
+});
+
+// === KEAMANAN OWASP 3: CORS RESTRICTION (ORIGIN WHITELABEL) ===
+const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'https://sukajadi.bandung.go.id'
+];
+
 app.use((req, res, next) => {
-    const allowedOrigin = req.headers.origin || "*";
-    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    const origin = req.headers.origin;
+    if (
+        !origin || 
+        allowedOrigins.includes(origin) || 
+        (origin && (origin.endsWith('.bandung.go.id') || origin.endsWith('.vercel.app')))
+    ) {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    }
     
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -133,14 +167,15 @@ db.getConnection((err, conn) => {
             }
         });
 
-        // Menjamin tersedianya kolom-kolom baru pada pengajuan_layanan (Kirmir, Jalan, UMKM, Lainnya)
+        // Menjamin tersedianya kolom-kolom baru pada pengajuan_layanan (Kirmir, Jalan, UMKM, Lainnya, Bukti Selesai)
         const kolomBaruLayanan = [
             { nama: 'alamat_rusak', tipe: 'TEXT NULL' },
             { nama: 'foto_bukti', tipe: 'VARCHAR(255) NULL' },
             { nama: 'nama_usaha', tipe: 'VARCHAR(150) NULL' },
             { nama: 'jenis_usaha', tipe: 'VARCHAR(100) NULL' },
             { nama: 'no_nib_suket', tipe: 'VARCHAR(100) NULL' },
-            { nama: 'dokumen_pendukung', tipe: 'VARCHAR(255) NULL' }
+            { nama: 'dokumen_pendukung', tipe: 'VARCHAR(255) NULL' },
+            { nama: 'foto_bukti_selesai', tipe: 'VARCHAR(255) NULL' }
         ];
 
         kolomBaruLayanan.forEach(col => {
@@ -361,21 +396,39 @@ const uploadLayananEdit = upload.fields([
     { name: 'dokumen_a2', maxCount: 1 }, { name: 'foto_rembuk', maxCount: 1 }, { name: 'daftar_hadir', maxCount: 1 },
     { name: 'ba_muskel', maxCount: 1 }, { name: 'foto_muskel', maxCount: 1 }, { name: 'foto_halaman', maxCount: 1 },
     { name: 'proposal_sarpras', maxCount: 1 }, { name: 'foto_sarpras', maxCount: 1 },
-    { name: 'foto_bukti', maxCount: 1 }, { name: 'dokumen_pendukung', maxCount: 1 }
+    { name: 'foto_bukti', maxCount: 1 }, { name: 'dokumen_pendukung', maxCount: 1 },
+    { name: 'foto_bukti_selesai', maxCount: 1 }
 ]);
 
-// RUTE KHUSUS UPDATE STATUS PENGAJUAN (CEPAT, RINGAN, TANPA MULTIPART)
-app.put('/layanan/:id/status', cekToken, (req, res) => {
+// RUTE KHUSUS UPDATE STATUS PENGAJUAN (DIPROSES ATAU SELESAI + UPLOAD BUKTI FOTO)
+app.put('/layanan/:id/status', cekToken, upload.single('foto_bukti_selesai'), (req, res) => {
     const id = req.params.id;
     const { status } = req.body;
+    const foto_bukti_selesai = req.file ? req.file.filename : null;
+
     if (!status) {
         return res.status(400).json({ status: 'gagal', pesan: 'Status pengajuan wajib diisi!' });
     }
-    const sql = `UPDATE pengajuan_layanan SET status = ? WHERE id = ?`;
-    db.query(sql, [status, id], (err, hasil) => {
-        if (err) return res.status(500).json({ status: 'error', pesan: 'Gagal memperbarui status pengajuan.' });
-        res.status(200).json({ status: 'sukses', pesan: `Status pengajuan berhasil diubah menjadi ${status}!` });
-    });
+
+    if (foto_bukti_selesai) {
+        // Ambil data foto bukti selesai lama jika ada untuk dibersihkan
+        db.query("SELECT foto_bukti_selesai FROM pengajuan_layanan WHERE id = ?", [id], (errOld, oldRows) => {
+            const oldFoto = oldRows && oldRows[0] ? oldRows[0].foto_bukti_selesai : null;
+            if (oldFoto) hapusFileLokal(oldFoto);
+
+            const sql = `UPDATE pengajuan_layanan SET status = ?, foto_bukti_selesai = ? WHERE id = ?`;
+            db.query(sql, [status, foto_bukti_selesai, id], (err, hasil) => {
+                if (err) return res.status(500).json({ status: 'error', pesan: 'Gagal memperbarui status dan bukti penyelesaian.' });
+                res.status(200).json({ status: 'sukses', pesan: `Status pengajuan berhasil diubah menjadi ${status} dan bukti penyelesaian disimpan!` });
+            });
+        });
+    } else {
+        const sql = `UPDATE pengajuan_layanan SET status = ? WHERE id = ?`;
+        db.query(sql, [status, id], (err, hasil) => {
+            if (err) return res.status(500).json({ status: 'error', pesan: 'Gagal memperbarui status pengajuan.' });
+            res.status(200).json({ status: 'sukses', pesan: `Status pengajuan berhasil diubah menjadi ${status}!` });
+        });
+    }
 });
 
 app.put('/layanan/:id', cekToken, uploadLayananEdit, [
@@ -394,7 +447,7 @@ app.put('/layanan/:id', cekToken, uploadLayananEdit, [
         'foto_ktp', 'foto_kk', 'surat_pengantar', 'sertifikat_tanah', 'foto_kondisi_rumah',
         'foto_lokasi', 'sk_buruan_sae', 'kebutuhan_tanaman', 'dokumen_a1', 'dokumen_a2',
         'foto_rembuk', 'daftar_hadir', 'ba_muskel', 'foto_muskel', 'foto_halaman',
-        'proposal_sarpras', 'foto_sarpras', 'foto_bukti', 'dokumen_pendukung'
+        'proposal_sarpras', 'foto_sarpras', 'foto_bukti', 'dokumen_pendukung', 'foto_bukti_selesai'
     ];
 
     const uploadedFiles = {};
@@ -486,7 +539,7 @@ app.delete('/layanan/:id', cekToken, (req, res) => {
         'foto_ktp', 'foto_kk', 'surat_pengantar', 'sertifikat_tanah', 'foto_kondisi_rumah',
         'foto_lokasi', 'sk_buruan_sae', 'kebutuhan_tanaman', 'dokumen_a1', 'dokumen_a2',
         'foto_rembuk', 'daftar_hadir', 'ba_muskel', 'foto_muskel', 'foto_halaman',
-        'proposal_sarpras', 'foto_sarpras', 'foto_bukti', 'dokumen_pendukung'
+        'proposal_sarpras', 'foto_sarpras', 'foto_bukti', 'dokumen_pendukung', 'foto_bukti_selesai'
     ];
     const colsToSelect = fileFields.join(', ');
 
@@ -509,8 +562,8 @@ app.delete('/layanan/:id', cekToken, (req, res) => {
     });
 });
 
-// RUTE POST LOGIN (TERBUKA UTK PUBLIK + MENCETAK TOKEN)
-app.post('/login', [
+// RUTE POST LOGIN (DILINDUNGI RATE LIMITER OWASP + MENCETAK TOKEN)
+app.post('/login', loginLimiter, [
     body('username').trim().escape().notEmpty().withMessage('Username wajib diisi!'),
     body('password').notEmpty().withMessage('Password wajib diisi!')
 ], cekValidasi, antiDoubleSubmit, (req, res) => {
@@ -546,7 +599,7 @@ app.post('/login', [
                         return res.status(500).json({ status: 'error', pesan: 'Konfigurasi server: Kunci JWT (KEY_NODE_JS) belum disetel di file .env!' });
                     }
                     delete adminData.password; // Jangan kirim password ke frontend
-                    const token = jwt.sign({ id: adminData.id, username: adminData.username }, KEY_NODEJS, { expiresIn: '1d' });
+                    const token = jwt.sign({ id: adminData.id, username: adminData.username }, KEY_NODEJS, { expiresIn: '3h' });
                     res.status(200).json({ status: 'sukses', pesan: 'Login Berhasil!', dataAdmin: adminData, token: token });
                 } else {
                     res.status(401).json({ status: 'gagal', pesan: 'Username atau Password salah!' });
